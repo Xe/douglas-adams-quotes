@@ -19,13 +19,23 @@
 
       # Nixpkgs instantiated for supported system types.
       nixpkgsFor = forAllSystems (system: import nixpkgs { inherit system; });
-    in {
+    in
+    {
 
       # Provide some binary packages for selected system types.
       packages = forAllSystems (system:
-        let pkgs = nixpkgsFor.${system};
-        in {
-          default = pkgs.buildGoModule {
+        let
+          pkgs = import nixpkgs {
+            inherit system;
+            overlays = [
+              (final: prev: {
+                go = prev.go_1_21;
+              })
+            ];
+          };
+        in
+        {
+          default = pkgs.buildGo121Module {
             pname = "douglas-adams-quotes";
             inherit version;
             src = ./.;
@@ -37,47 +47,68 @@
         let pkgs = nixpkgsFor.${system};
         in { config, lib, pkgs, ... }:
 
-        with lib;
-        let
-          cfg = config.xe.services.douglas-adams-quotes;
-        in {
-          options.xe.services.douglas-adams-quotes = {
-            enable = mkEnableOption "";
+          with lib;
+          let
+            cfg = config.xe.services.douglas-adams-quotes;
+          in
+          {
+            options.xe.services.douglas-adams-quotes = {
+              enable = mkEnableOption "";
 
-            logLevel = mkOption {
+              logLevel = mkOption {
                 type = with types; enum [ "DEBUG" "INFO" "ERROR" ];
                 example = "DEBUG";
                 default = "INFO";
                 description = "log level for this application";
-            };
+              };
 
-            package = mkOption {
-              type = types.package;
-              default = self.packages.${system}.default;
-              description = "rhea package to use";
-            };
-          };
-
-          config = mkIf cfg.enable {
-            systemd.services.douglas-adams-quotes = {
-              description = "Douglas Adams quotes";
-              wantedBy = [ "multi-user.target" ];
-
-              serviceConfig = {
-                ExecStart = "${cfg.package}/bin/douglas-adams-quotes --log-level=${cfg.logLevel} --addr=:${builtins.toString cfg.port}";
-                Restart = "on-failure";
-                RestartSec = "5s";
+              package = mkOption {
+                type = types.package;
+                default = self.packages.${system}.default;
+                description = "rhea package to use";
               };
             };
-          };
-        });
 
-      devShell = forAllSystems (system:
+            config = mkIf cfg.enable {
+              systemd.services.douglas-adams-quotes = {
+                description = "Douglas Adams quotes";
+                wantedBy = [ "multi-user.target" ];
+
+                serviceConfig = {
+                  ExecStart = "${cfg.package}/bin/douglas-adams-quotes --log-level=${cfg.logLevel} --addr=:${builtins.toString cfg.port}";
+                  Restart = "on-failure";
+                  RestartSec = "5s";
+                };
+              };
+            };
+          });
+
+      devShells.default = forAllSystems (system:
         let pkgs = nixpkgsFor.${system};
         in with pkgs;
         mkShell {
           buildInputs =
-            [ go gotools go-tools gopls nixpkgs-fmt ];
+            [ go_1_21 gotools go-tools gopls nixpkgs-fmt ];
         });
+
+      checks.x86_64-linux = let
+        pkgs = nixpkgs.legacyPackages.x86_64-linux; 
+        in {
+          basic = pkgs.nixosTest({
+            name = "douglas-adams-quotes";
+            nodes.default = { config, pkgs, ... }: {
+              imports = [ self.nixosModules.default ];
+              services.xe.douglas-adams-quotes.enable = true;
+            };
+            testScript = ''
+              start_all()
+
+              default.wait_for_unit("douglas-adams-quotes.service")
+              print(default.wait_until_succeeds(
+                "curl -s http://localhost:8080/quote.json"
+              ))
+            '';
+          });
+        };
     };
 }

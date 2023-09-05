@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"html/template"
-	"log"
 	"log/slog"
 	"math/rand"
 	"net"
@@ -131,7 +130,10 @@ func main() {
 	})
 
 	slog.Info("listening", "addr", *addr)
-	log.Fatal(http.ListenAndServe(*addr, HTTPLog(mux)))
+	if err := http.ListenAndServe(*addr, HTTPLog(mux)); err != nil {
+		slog.Error("can't listen and serve", "err", err)
+		os.Exit(1)
+	}
 }
 
 type statusResponseWriter struct {

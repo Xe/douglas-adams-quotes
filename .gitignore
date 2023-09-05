@@ -7,7 +7,6 @@
 *.dll
 *.so
 *.dylib
-.direnv
 
 # Test binary, built with `go test -c`
 *.test
@@ -23,3 +22,7 @@ go.work
 
 # node
 node_modules
+
+# nix
+.direnv
+result
