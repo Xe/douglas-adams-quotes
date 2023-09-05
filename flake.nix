@@ -59,10 +59,16 @@
                 description = "log level for this application";
               };
 
+              port = mkOption {
+                type = types.port;
+                default = 8080;
+                description = "port to listen on";
+              };
+
               package = mkOption {
                 type = types.package;
                 default = self.packages.${pkgs.system}.default;
-                description = "rhea package to use";
+                description = "package to use for this service (defaults to the one in the flake)";
               };
             };
 
@@ -72,7 +78,7 @@
                 wantedBy = [ "multi-user.target" ];
 
                 serviceConfig = {
-                  ExecStart = "${cfg.package}/bin/douglas-adams-quotes --log-level=${cfg.logLevel} --addr=:${builtins.toString cfg.port}";
+                  ExecStart = "${cfg.package}/bin/douglas-adams-quotes --log-level=${cfg.logLevel} --addr=:${toString cfg.port}";
                   Restart = "on-failure";
                   RestartSec = "5s";
                 };
