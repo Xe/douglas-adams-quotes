@@ -43,10 +43,7 @@
           };
         });
 
-      nixosModules.default = forAllSystems (system:
-        let pkgs = nixpkgsFor.${system};
-        in { config, lib, pkgs, ... }:
-
+      nixosModules.default = { config, lib, pkgs, ... }:
           with lib;
           let
             cfg = config.xe.services.douglas-adams-quotes;
@@ -64,7 +61,7 @@
 
               package = mkOption {
                 type = types.package;
-                default = self.packages.${system}.default;
+                default = self.packages.${pkgs.system}.default;
                 description = "rhea package to use";
               };
             };
@@ -81,7 +78,7 @@
                 };
               };
             };
-          });
+          };
 
       devShells.default = forAllSystems (system:
         let pkgs = nixpkgsFor.${system};
