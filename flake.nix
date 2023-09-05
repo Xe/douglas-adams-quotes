@@ -50,7 +50,7 @@
           in
           {
             options.xe.services.douglas-adams-quotes = {
-              enable = mkEnableOption "";
+              enable = mkEnableOption "Enable the Douglas Adams quotes service";
 
               logLevel = mkOption {
                 type = with types; enum [ "DEBUG" "INFO" "ERROR" ];
@@ -95,7 +95,7 @@
             name = "douglas-adams-quotes";
             nodes.default = { config, pkgs, ... }: {
               imports = [ self.nixosModules.default ];
-              services.xe.douglas-adams-quotes.enable = true;
+              xe.services.douglas-adams-quotes.enable = true;
             };
             testScript = ''
               start_all()
