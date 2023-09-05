@@ -2,59 +2,50 @@ package main
 
 import (
 	"embed"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"html/template"
 	"log"
 	"log/slog"
+	"math/rand"
+	"net"
 	"net/http"
 	"os"
-	"path/filepath"
-
-	"tailscale.com/hostinfo"
-	"tailscale.com/tsnet"
+	"strconv"
+	"time"
 )
 
 var (
-	hostname        = flag.String("hostname", envOr("TSNET_HOSTNAME", "what"), "hostname to use on your tailnet, TSNET_HOSTNAME in the environment")
-	dataDir         = flag.String("data-location", dataLocation(), "where data is stored, defaults to DATA_DIR or ~/.config/tailscale/paste")
-	tsnetLogVerbose = flag.Bool("tsnet-verbose", hasEnv("TSNET_VERBOSE"), "if set, have tsnet log verbosely to standard error")
-	slogLevel       = flag.String("slog-level", envOr("SLOG_LEVEL", "INFO"), "log level")
+	addr      = flag.String("addr", envOr("ADDR", ":8080"), "listen address")
+	slogLevel = flag.String("slog-level", envOr("SLOG_LEVEL", "INFO"), "log level")
 
 	//go:embed static
 	staticFiles embed.FS // your static assets
 
 	//go:embed tmpl/*.html
 	templateFiles embed.FS // your template files
+
+	//go:embed quotes.json
+	quotesJSON []byte
 )
 
-func hasEnv(name string) bool {
-	_, ok := os.LookupEnv(name)
-	return ok
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }
 
-func dataLocation() string {
-	if dir, ok := os.LookupEnv("DATA_DIR"); ok {
-		return dir
-	}
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return os.Getenv("DATA_DIR")
-	}
-	return filepath.Join(dir, "tailscale", *hostname)
-}
-
-func envOr(key, defaultVal string) string {
-	if result, ok := os.LookupEnv(key); ok {
-		return result
-	}
-	return defaultVal
+type Quote struct {
+	Quote  string `json:"quote"`
+	Person string `json:"person"`
+	Source string `json:"source"`
+	ID     int    `json:"id"`
 }
 
 func main() {
 	flag.Parse()
-
-	hostinfo.SetApp("what")
 
 	// Set log level, configure logger
 	var programLevel slog.Level
@@ -67,56 +58,60 @@ func main() {
 		Level:     programLevel,
 	})))
 
-	// Create the data directory if it doesn't exist.
-	if err := os.MkdirAll(*dataDir, 0700); err != nil {
-		log.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(*dataDir, "tsnet"), 0700); err != nil {
-		log.Fatal(err)
-	}
-
-	// Create the tsnet server.
-	s := &tsnet.Server{
-		Hostname: *hostname,
-		Dir:      filepath.Join(*dataDir, "tsnet"),
-		Logf:     func(string, ...any) {},
-	}
-
-	if *tsnetLogVerbose {
-		s.Logf = log.Printf
-	}
-
-	// Acquire any resources such as a database client.
-
-	// Start the tsnet server.
-	if err := s.Start(); err != nil {
-		log.Fatal(err)
-	}
-
-	lc, err := s.LocalClient()
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	tmpls := template.Must(template.ParseFS(templateFiles, "tmpl/*.html"))
 	mux := http.NewServeMux()
 
+	var quotes []Quote
+	if err := json.Unmarshal(quotesJSON, &quotes); err != nil {
+		slog.Error("can't unmarshal quotes", "err", err)
+	}
+
+	for i, q := range quotes {
+		q.ID = i
+		quotes[i] = q
+	}
+
 	mux.Handle("/static/", http.FileServer(http.FS(staticFiles)))
 
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		userInfo, err := lc.WhoIs(r.Context(), r.RemoteAddr)
-		if err != nil {
-			slog.Error("can't get user info", "err", err, "remoteAddr", r.RemoteAddr)
-			http.Error(w, "can't get user info", http.StatusInternalServerError)
+	mux.HandleFunc("/quote.json", func(w http.ResponseWriter, r *http.Request) {
+		id := rand.Intn(len(quotes))
+		json.NewEncoder(w).Encode(quotes[id])
+	})
+
+	mux.HandleFunc("/quotes/", func(w http.ResponseWriter, r *http.Request) {
+		id := r.URL.Path[len("/quotes/"):]
+		if id == "" {
+			http.Error(w, "quote not found, no ID", http.StatusNotFound)
 			return
 		}
 
+		idInt, err := strconv.Atoi(id)
+		if err != nil {
+			http.Error(w, "quote not found, invalid ID", http.StatusNotFound)
+			return
+		}
+
+		if idInt < 0 || idInt >= len(quotes) {
+			http.Error(w, "quote not found, ID out of range", http.StatusNotFound)
+			return
+		}
+		q := quotes[idInt]
+
+		if err := tmpls.ExecuteTemplate(w, "index.html", map[string]any{
+			"Title": "douglas-adams-quotes/quote/",
+			"Quote": q,
+		}); err != nil {
+			slog.Error("can't execute template", "err", err, "remoteAddr", r.RemoteAddr, "path", r.URL.Path)
+			return
+		}
+	})
+
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			w.WriteHeader(http.StatusNotFound)
 			if err := tmpls.ExecuteTemplate(w, "404.html", map[string]any{
-				"Title":    "what/",
-				"UserInfo": userInfo,
-				"Path":     r.URL.Path,
+				"Title": "douglas-adams-quotes/",
+				"Path":  r.URL.Path,
 			}); err != nil {
 				slog.Error("can't execute template", "err", err, "remoteAddr", r.RemoteAddr, "path", r.URL.Path)
 				return
@@ -124,20 +119,59 @@ func main() {
 			return
 		}
 
+		id := rand.Intn(len(quotes))
+
 		if err := tmpls.ExecuteTemplate(w, "index.html", map[string]any{
-			"Title":    "what/",
-			"UserInfo": userInfo,
+			"Title": "douglas-adams-quotes/",
+			"Quote": quotes[id],
 		}); err != nil {
 			slog.Error("can't execute template", "err", err, "remoteAddr", r.RemoteAddr, "path", r.URL.Path)
 			return
 		}
 	})
 
-	ln, err := s.ListenTLS("tcp", ":443")
-	if err != nil {
-		log.Fatal(err)
-	}
+	slog.Info("listening", "addr", *addr)
+	log.Fatal(http.ListenAndServe(*addr, HTTPLog(mux)))
+}
 
-	slog.Info("listening", "addr", ln.Addr().String())
-	log.Fatal(http.Serve(ln, mux))
+type statusResponseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusResponseWriter) WriteHeader(code int) {
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+// HTTPLog automagically logs HTTP traffic.
+func HTTPLog(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host, _, _ := net.SplitHostPort(r.RemoteAddr)
+
+		st := time.Now()
+		srw := &statusResponseWriter{
+			ResponseWriter: w,
+		}
+
+		next.ServeHTTP(srw, r)
+
+		if srw.status == 0 {
+			srw.status = http.StatusOK
+		}
+		dur := time.Since(st)
+
+		attrs := slog.GroupValue(
+			slog.String("remote_addr", host),
+			slog.String("method", r.Method),
+			slog.String("path", r.URL.Path),
+			slog.String("user_agent", r.UserAgent()),
+			slog.Int("status", srw.status),
+			slog.String("request_duration", dur.String()),
+			slog.Int64("request_duration_ns", dur.Nanoseconds()),
+			slog.String("referer", r.Referer()),
+		)
+
+		slog.Debug("http request", "data", attrs)
+	})
 }
