@@ -18,21 +18,21 @@
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
 
       # Nixpkgs instantiated for supported system types.
-      nixpkgsFor = forAllSystems (system: import nixpkgs { inherit system; });
+      nixpkgsFor = forAllSystems (system: import nixpkgs {
+        inherit system;
+        overlays = [
+          (final: prev: {
+            go = prev.go_1_21;
+          })
+        ];
+      });
     in
     {
 
       # Provide some binary packages for selected system types.
       packages = forAllSystems (system:
         let
-          pkgs = import nixpkgs {
-            inherit system;
-            overlays = [
-              (final: prev: {
-                go = prev.go_1_21;
-              })
-            ];
-          };
+          pkgs = nixpkgsFor.${system};
         in
         {
           default = pkgs.buildGo121Module {
@@ -44,47 +44,49 @@
         });
 
       nixosModules.default = { config, lib, pkgs, ... }:
-          with lib;
-          let
-            cfg = config.xe.services.douglas-adams-quotes;
-          in
-          {
-            options.xe.services.douglas-adams-quotes = {
-              enable = mkEnableOption "Enable the Douglas Adams quotes service";
+        with lib;
+        let
+          cfg = config.xe.services.douglas-adams-quotes;
+        in
+        {
+          options.xe.services.douglas-adams-quotes = {
+            enable = mkEnableOption "Enable the Douglas Adams quotes service";
 
-              logLevel = mkOption {
-                type = with types; enum [ "DEBUG" "INFO" "ERROR" ];
-                example = "DEBUG";
-                default = "INFO";
-                description = "log level for this application";
-              };
-
-              port = mkOption {
-                type = types.port;
-                default = 8080;
-                description = "port to listen on";
-              };
-
-              package = mkOption {
-                type = types.package;
-                default = self.packages.${pkgs.system}.default;
-                description = "package to use for this service (defaults to the one in the flake)";
-              };
+            logLevel = mkOption {
+              type = with types; enum [ "DEBUG" "INFO" "ERROR" ];
+              example = "DEBUG";
+              default = "INFO";
+              description = "log level for this application";
             };
 
-            config = mkIf cfg.enable {
-              systemd.services.douglas-adams-quotes = {
-                description = "Douglas Adams quotes";
-                wantedBy = [ "multi-user.target" ];
+            port = mkOption {
+              type = types.port;
+              default = 8080;
+              description = "port to listen on";
+            };
 
-                serviceConfig = {
-                  ExecStart = "${cfg.package}/bin/douglas-adams-quotes --slog-level=${cfg.logLevel} --addr=:${toString cfg.port}";
-                  Restart = "on-failure";
-                  RestartSec = "5s";
-                };
+            package = mkOption {
+              type = types.package;
+              default = self.packages.${pkgs.system}.default;
+              description = "package to use for this service (defaults to the one in the flake)";
+            };
+          };
+
+          config = mkIf cfg.enable {
+            systemd.services.douglas-adams-quotes = {
+              description = "Douglas Adams quotes";
+              wantedBy = [ "multi-user.target" ];
+
+              serviceConfig = {
+                DynamicUser = "douglas-adams-quotes";
+                DynamicGroup = "douglas-adams-quotes";
+                ExecStart = "${cfg.package}/bin/douglas-adams-quotes --slog-level=${cfg.logLevel} --addr=:${toString cfg.port}";
+                Restart = "on-failure";
+                RestartSec = "5s";
               };
             };
           };
+        };
 
       devShells.default = forAllSystems (system:
         let pkgs = nixpkgsFor.${system};
@@ -94,10 +96,12 @@
             [ go_1_21 gotools go-tools gopls nixpkgs-fmt ];
         });
 
-      checks.x86_64-linux = let
-        pkgs = nixpkgs.legacyPackages.x86_64-linux; 
-        in {
-          basic = pkgs.nixosTest({
+      checks.x86_64-linux =
+        let
+          pkgs = nixpkgs.legacyPackages.x86_64-linux;
+        in
+        {
+          basic = pkgs.nixosTest ({
             name = "douglas-adams-quotes";
             nodes.default = { config, pkgs, ... }: {
               imports = [ self.nixosModules.default ];
