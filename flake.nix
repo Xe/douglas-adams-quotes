@@ -79,7 +79,6 @@
 
               serviceConfig = {
                 DynamicUser = "douglas-adams-quotes";
-                DynamicGroup = "douglas-adams-quotes";
                 ExecStart = "${cfg.package}/bin/douglas-adams-quotes --slog-level=${cfg.logLevel} --addr=:${toString cfg.port}";
                 Restart = "on-failure";
                 RestartSec = "5s";
