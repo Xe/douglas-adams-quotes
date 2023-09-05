@@ -78,7 +78,7 @@
               wantedBy = [ "multi-user.target" ];
 
               serviceConfig = {
-                DynamicUser = "douglas-adams-quotes";
+                DynamicUser = "yes";
                 ExecStart = "${cfg.package}/bin/douglas-adams-quotes --slog-level=${cfg.logLevel} --addr=:${toString cfg.port}";
                 Restart = "on-failure";
                 RestartSec = "5s";
