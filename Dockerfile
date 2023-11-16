@@ -7,9 +7,9 @@ ENV CGO_ENABLED=0
 RUN apk -U add nodejs yarn && \
     yarn install && \
     yarn build:css && \
-    go build -o /app/bin/what .
+    go build -o /app/bin/daq .
 
-FROM alpine:3.18
-COPY --from=builder /app/bin/what /app/bin/what
+FROM scratch
+COPY --from=builder /app/bin/daq /daq
 
-CMD ["/app/bin/what"]
+CMD ["/daq"]
